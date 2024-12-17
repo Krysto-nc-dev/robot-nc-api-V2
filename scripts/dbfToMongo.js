@@ -17,6 +17,13 @@ if (!mongoUri) {
   process.exit(1);
 }
 
+const ERROR_LOG_FILE = "./error.log";
+
+// Fonction pour logger les erreurs
+const logError = (message) => {
+  fs.appendFileSync(ERROR_LOG_FILE, `${new Date().toISOString()} - ${message}\n`);
+};
+
 // Connexion à MongoDB
 const connectDB = async () => {
   try {
@@ -29,14 +36,15 @@ const connectDB = async () => {
   }
 };
 
-// Fonction pour nettoyer les valeurs NaN
+// Nettoyage des valeurs NaN et suppression des champs dupliqués
 const sanitizeRecord = (record) => {
-  return Object.fromEntries(
-    Object.entries(record).map(([key, value]) => [
-      key,
-      typeof value === "number" && isNaN(value) ? 0 : value,
-    ])
-  );
+  const sanitized = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (!sanitized.hasOwnProperty(key)) {
+      sanitized[key] = typeof value === "number" && isNaN(value) ? 0 : value;
+    }
+  }
+  return sanitized;
 };
 
 // Fonction pour formater le temps écoulé
@@ -68,7 +76,9 @@ const loadModel = async (folder, modelType) => {
     const { default: model } = await import(modelPath);
     return model;
   } catch (err) {
-    console.warn(colors.yellow(`⚠️ Impossible de charger le modèle ${modelFileName}: ${err.message}`));
+    const errorMsg = `⚠️ Impossible de charger le modèle ${modelFileName}: ${err.message}`;
+    console.warn(colors.yellow(errorMsg));
+    logError(errorMsg);
     return null;
   }
 };
@@ -77,7 +87,7 @@ const loadModel = async (folder, modelType) => {
 const createProgressBar = (fileName, total) => {
   return new cliProgress.SingleBar(
     {
-      format: `${colors.yellow.bold(fileName)} |${colors.green("{bar}")}| ${colors.green("{value}")}${colors.red("/{total}")} Enregistrements || {percentage}% || ETA: {eta_formatted}`,
+      format: `${colors.yellow.bold(fileName)} |${colors.blue("{bar}")}| ${colors.green("{value}")}${colors.blue("/{total}")} Enregistrements || {percentage}% || ETA: {eta_formatted}`,
       barCompleteChar: "\u2588",
       barIncompleteChar: "\u2591",
       hideCursor: true,
@@ -90,7 +100,9 @@ const createProgressBar = (fileName, total) => {
 // Traitement des fichiers DBF
 const processFile = async (filePath, model, fileName, folder) => {
   if (!fs.existsSync(filePath)) {
-    console.warn(colors.yellow(`⚠️ Fichier ${fileName}.dbf manquant dans ${folder}`));
+    const errorMsg = `⚠️ Fichier ${fileName}.dbf manquant dans ${folder}`;
+    console.warn(colors.yellow(errorMsg));
+    logError(errorMsg);
     return;
   }
 
@@ -113,7 +125,9 @@ const processFile = async (filePath, model, fileName, folder) => {
       insertedCount++;
       progressBar.update(insertedCount);
     } catch (err) {
-      console.error(colors.red(`❌ Erreur d'insertion : ${err.message}`));
+      const errorMsg = `❌ Erreur d'insertion dans ${fileName}: ${err.message}`;
+      console.error(colors.red(errorMsg));
+      logError(errorMsg);
     }
   }
 
@@ -142,7 +156,9 @@ const importDbfsData = async () => {
       const folderPath = path.join(DBF_FOLDER, folder);
 
       if (!fs.existsSync(folderPath)) {
-        console.warn(colors.yellow(`⚠️ Dossier introuvable : ${folderPath}`));
+        const errorMsg = `⚠️ Dossier introuvable : ${folderPath}`;
+        console.warn(colors.yellow(errorMsg));
+        logError(errorMsg);
         continue;
       }
 
@@ -180,8 +196,7 @@ const importDbfsData = async () => {
     console.timeEnd("⏱️ Temps total d'exécution");
   } catch (error) {
     console.error(colors.red.bold(`❌ Erreur : ${error.message}`));
-    console.log(colors.cyan(`⏱️ Temps écoulé avant l'erreur : ${formatElapsedTime()}`));
-    console.timeEnd("⏱️ Temps total d'exécution");
+    logError(`Erreur critique : ${error.message}`);
   } finally {
     process.exit();
   }
