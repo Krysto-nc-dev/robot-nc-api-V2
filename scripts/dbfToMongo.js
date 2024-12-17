@@ -3,7 +3,7 @@ import fs from "fs";
 import { DBFFile } from "dbffile";
 import dotenv from "dotenv";
 import colors from "colors";
-import { SingleBar, Presets } from "cli-progress";
+import cliProgress from "cli-progress";
 import mongoose from "mongoose";
 import { pathToFileURL } from "url";
 
@@ -20,11 +20,11 @@ if (!mongoUri) {
 // Connexion à MongoDB
 const connectDB = async () => {
   try {
-    console.log("🔌 Connexion à MongoDB...".yellow);
+    console.log(colors.yellow.bold("\n🔌 Connexion à MongoDB..."));
     await mongoose.connect(mongoUri);
-    console.log("✅ MongoDB connecté avec succès.".green);
+    console.log(colors.green.bold("✅ MongoDB connecté avec succès.\n"));
   } catch (err) {
-    console.error(`❌ Erreur MongoDB : ${err.message}`.red);
+    console.error(colors.red.bold(`❌ Erreur MongoDB : ${err.message}`));
     process.exit(1);
   }
 };
@@ -46,7 +46,6 @@ const formatElapsedTime = () => {
   const seconds = Math.floor((elapsedMs / 1000) % 60);
   const minutes = Math.floor((elapsedMs / (1000 * 60)) % 60);
   const hours = Math.floor(elapsedMs / (1000 * 60 * 60));
-
   return `${hours}h ${minutes}m ${seconds}s`;
 };
 
@@ -69,62 +68,69 @@ const loadModel = async (folder, modelType) => {
     const { default: model } = await import(modelPath);
     return model;
   } catch (err) {
-    console.warn(`⚠️ Impossible de charger le modèle ${modelFileName}: ${err.message}`.yellow);
+    console.warn(colors.yellow(`⚠️ Impossible de charger le modèle ${modelFileName}: ${err.message}`));
     return null;
   }
 };
 
-// Traitement des fichiers DBF avec journalisation des erreurs
+// Configuration de la barre de progression VERTE
+const createProgressBar = (fileName) => {
+  return new cliProgress.SingleBar(
+    {
+      format: `${colors.bold.yellow(fileName)} |${colors.green("{bar}")}| ${colors.green("{value}/{total}")} Enregistrements || {percentage}% || ETA: {eta_formatted}`,
+      barCompleteChar: "\u2588", // caractère plein
+      barIncompleteChar: "\u2591", // caractère vide
+      hideCursor: true,
+    },
+    cliProgress.Presets.shades_classic
+  );
+};
+
+// Traitement des fichiers DBF avec décompte par insertion
 const processFile = async (filePath, model, fileName, folder) => {
   if (!fs.existsSync(filePath)) {
-    console.warn(`⚠️ Fichier ${fileName}.dbf manquant dans ${folder}`.yellow);
+    console.warn(colors.yellow(`⚠️ Fichier ${fileName}.dbf manquant dans ${folder}`));
     return;
   }
 
   const dbf = await DBFFile.open(filePath);
-  console.log(`📄 Lecture de ${fileName}.dbf. ${dbf.recordCount} enregistrements.`.green);
+  console.log(colors.cyan.bold(`📄 Lecture de ${fileName}.dbf. ${dbf.recordCount} enregistrements.`));
 
-  console.log(`🗑️ Suppression des anciennes données pour ${fileName}...`.yellow);
+  console.log(colors.yellow(`🗑️ Suppression des anciennes données pour ${fileName}...`));
   await model.deleteMany();
 
-  const progressBar = new SingleBar(
-    {
-      format: `${fileName} |{bar}| {percentage}% | {value}/{total} Enregistrements`,
-      clearOnComplete: false,
-      hideCursor: true,
-    },
-    Presets.shades_classic
-  );
-
-  progressBar.start(dbf.recordCount, 0);
+  const progressBar = createProgressBar(fileName);
+  progressBar.start(dbf.recordCount, 0, { eta_formatted: "N/A" });
 
   const records = await dbf.readRecords();
   let insertedCount = 0;
-  const batchSize = 1000;
 
-  for (let i = 0; i < records.length; i += batchSize) {
-    const batch = records.slice(i, i + batchSize).map(sanitizeRecord);
-
+  for (const record of records) {
+    const sanitizedRecord = sanitizeRecord(record);
     try {
-      const result = await model.insertMany(batch, { ordered: false });
-      insertedCount += result.length;
+      await model.create(sanitizedRecord); // Insertion par document
+      insertedCount++;
+      progressBar.update(insertedCount); // Mise à jour de la barre de progression
     } catch (err) {
-      console.error(`❌ Erreur d'insertion : ${err.message}`.red);
+      console.error(colors.red(`❌ Erreur d'insertion : ${err.message}`));
     }
-    progressBar.update(insertedCount);
   }
 
   progressBar.stop();
-  console.log(`✅ Importation réussie pour ${fileName}. Total inséré : ${insertedCount}/${dbf.recordCount} enregistrements.`.green);
+  console.log(
+    colors.green.bold(
+      `✅ Importation réussie pour ${fileName}. Total inséré : ${colors.green.bold(insertedCount)}/${dbf.recordCount} enregistrements.`
+    )
+  );
 };
 
-// Importation des données DBF pour chaque dossier
+// Importation des données DBF
 const importDbfsData = async () => {
   console.time("⏱️ Temps total d'exécution");
 
   const folders = [
     "AVB", "AW", "DQ", "FMB", "HD", "KONE", "KOUMAC", "LD",
-    "LE_BROUSSARD", "MEARE", "PAITA_BRICOLAGE", "QC", "SITEC", "VKP"
+    "LE_BROUSSARD", "MEARE", "PAITA_BRICOLAGE", "QC", "SITEC", "VKP",
   ];
   const DBF_FOLDER = path.resolve("./_dbf");
 
@@ -135,11 +141,11 @@ const importDbfsData = async () => {
       const folderPath = path.join(DBF_FOLDER, folder);
 
       if (!fs.existsSync(folderPath)) {
-        console.warn(`⚠️ Dossier introuvable : ${folderPath}`.yellow);
+        console.warn(colors.yellow(`⚠️ Dossier introuvable : ${folderPath}`));
         continue;
       }
 
-      console.log(`\n📂 Traitement des fichiers dans le dossier : ${folder}`.blue);
+      console.log(colors.blue.bold(`\n📂 Traitement des fichiers dans le dossier : ${folder}`));
 
       const models = {
         article: await loadModel(folder, "article"),
@@ -163,17 +169,17 @@ const importDbfsData = async () => {
             tier: "tiers.dbf",
           };
           await processFile(path.join(folderPath, fileMap[fileName]), model, fileName, folder);
-          console.log(`⏱️ Temps écoulé depuis le lancement : ${formatElapsedTime()}`.cyan);
+          console.log(colors.cyan(`⏱️ Temps écoulé depuis le lancement : ${formatElapsedTime()}`));
         }
       }
     }
 
-    console.log("🎉 Importation complète pour TOUS les dossiers.".green.inverse);
-    console.log(`⏱️ Temps total écoulé : ${formatElapsedTime()}`.cyan);
+    console.log(colors.green.inverse("🎉 Importation complète pour TOUS les dossiers."));
+    console.log(colors.cyan(`⏱️ Temps total écoulé : ${formatElapsedTime()}`));
     console.timeEnd("⏱️ Temps total d'exécution");
   } catch (error) {
-    console.error(`❌ Erreur : ${error.message}`.red.inverse);
-    console.log(`⏱️ Temps écoulé avant l'erreur : ${formatElapsedTime()}`.cyan);
+    console.error(colors.red.bold(`❌ Erreur : ${error.message}`));
+    console.log(colors.cyan(`⏱️ Temps écoulé avant l'erreur : ${formatElapsedTime()}`));
     console.timeEnd("⏱️ Temps total d'exécution");
   } finally {
     process.exit();
