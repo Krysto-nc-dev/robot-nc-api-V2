@@ -13,7 +13,7 @@ dotenv.config({ path: path.resolve("config/config.env") });
 const mongoUri = process.env.MONGO_URI || process.env.MONGO_URI_DEV;
 
 if (!mongoUri) {
-  console.error("❌ MONGO_URI non défini dans config/config.env.".red);
+  console.error(colors.red("❌ MONGO_URI non défini dans config/config.env."));
   process.exit(1);
 }
 
@@ -29,7 +29,7 @@ const connectDB = async () => {
   }
 };
 
-// Nettoyage des valeurs NaN dans les enregistrements
+// Fonction pour nettoyer les valeurs NaN
 const sanitizeRecord = (record) => {
   return Object.fromEntries(
     Object.entries(record).map(([key, value]) => [
@@ -73,20 +73,21 @@ const loadModel = async (folder, modelType) => {
   }
 };
 
-// Configuration de la barre de progression VERTE
-const createProgressBar = (fileName) => {
+// Création de la barre de progression personnalisée
+const createProgressBar = (fileName, total) => {
   return new cliProgress.SingleBar(
     {
-      format: `${colors.bold.yellow(fileName)} |${colors.green("{bar}")}| ${colors.green("{value}/{total}")} Enregistrements || {percentage}% || ETA: {eta_formatted}`,
-      barCompleteChar: "\u2588", // caractère plein
-      barIncompleteChar: "\u2591", // caractère vide
+      format: `${colors.yellow.bold(fileName)} |${colors.green("{bar}")}| ${colors.green("{value}")}${colors.red("/{total}")} Enregistrements || {percentage}% || ETA: {eta_formatted}`,
+      barCompleteChar: "\u2588",
+      barIncompleteChar: "\u2591",
       hideCursor: true,
+      etaBuffer: 50,
     },
-    cliProgress.Presets.shades_classic
+    cliProgress.Presets.rect
   );
 };
 
-// Traitement des fichiers DBF avec décompte par insertion
+// Traitement des fichiers DBF
 const processFile = async (filePath, model, fileName, folder) => {
   if (!fs.existsSync(filePath)) {
     console.warn(colors.yellow(`⚠️ Fichier ${fileName}.dbf manquant dans ${folder}`));
@@ -99,8 +100,8 @@ const processFile = async (filePath, model, fileName, folder) => {
   console.log(colors.yellow(`🗑️ Suppression des anciennes données pour ${fileName}...`));
   await model.deleteMany();
 
-  const progressBar = createProgressBar(fileName);
-  progressBar.start(dbf.recordCount, 0, { eta_formatted: "N/A" });
+  const progressBar = createProgressBar(fileName, dbf.recordCount);
+  progressBar.start(dbf.recordCount, 0);
 
   const records = await dbf.readRecords();
   let insertedCount = 0;
@@ -108,9 +109,9 @@ const processFile = async (filePath, model, fileName, folder) => {
   for (const record of records) {
     const sanitizedRecord = sanitizeRecord(record);
     try {
-      await model.create(sanitizedRecord); // Insertion par document
+      await model.create(sanitizedRecord);
       insertedCount++;
-      progressBar.update(insertedCount); // Mise à jour de la barre de progression
+      progressBar.update(insertedCount);
     } catch (err) {
       console.error(colors.red(`❌ Erreur d'insertion : ${err.message}`));
     }
@@ -119,12 +120,12 @@ const processFile = async (filePath, model, fileName, folder) => {
   progressBar.stop();
   console.log(
     colors.green.bold(
-      `✅ Importation réussie pour ${fileName}. Total inséré : ${colors.green.bold(insertedCount)}/${dbf.recordCount} enregistrements.`
+      `✅ Importation réussie pour ${fileName}. Total inséré : ${colors.green(insertedCount)}${colors.blue("/")}${dbf.recordCount} enregistrements.`
     )
   );
 };
 
-// Importation des données DBF
+// Fonction principale d'importation des données
 const importDbfsData = async () => {
   console.time("⏱️ Temps total d'exécution");
 
